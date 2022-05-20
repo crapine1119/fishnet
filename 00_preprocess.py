@@ -1,18 +1,31 @@
+from sklearn.model_selection import train_test_split
+import argparse
 from utils import *
-from torchvision.utils import make_grid
-import matplotlib.pyplot as plt
-
 ##
+parser = argparse.ArgumentParser(description='configs')
+# configs for preprocess
+parser.add_argument('--resize',         default=32,         type=int,      help = '')
+# hparams = parser.parse_args()
+hparams = parser.parse_args(args=[]) # 테스트용
+
+## check image
+seed_everything()
+
 rdir = r'D:\cv\Dataset\cifar-10-python\cifar-10-batches-py'
-fnm = f'{rdir}/data_batch_1'
+names = 'airplane,automobile,bird,cat,deer,dog,frog,horse,ship,truck'.split(',')
+n2l = {n:e for e,n in enumerate(names)}
+l2n = {e:n for e,n in enumerate(names)}
 
-d = unpickle(fnm)
-d.keys()
-
-# test dset
-imgset_flat = d[b'data']
-imgset = imgset_flat.reshape(-1,3,32,32)
-
-batch = torch.LongTensor(imgset[:64])
-plt.imshow(make_grid(batch,padding=2).permute(1,2,0).numpy())
+# check_img(rdir)
 ##
+
+trans = A.Compose([A.Normalize(),
+                   ToTensorV2()])
+
+trnx,tstx,trny,tsty = load_cifar(rdir)
+
+trnx,valx,trny,valy = train_test_split(trnx,trny,test_size=0.2)
+
+trn_set = custom(trnx,trny,trans=trans,train=True)
+val_set = custom(trnx,trny,trans=trans,train=True)
+tst_set = custom(trnx,trny,trans=trans,train=False)
