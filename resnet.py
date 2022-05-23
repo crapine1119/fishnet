@@ -1,12 +1,5 @@
 import numpy as np
-import pandas as pd
 import cv2 as cv
-import pickle
-import random
-import os
-import matplotlib.pyplot as plt
-from glob import glob as glob
-from tqdm import tqdm as tqdm
 #
 import albumentations as A
 from albumentations.pytorch.transforms import ToTensorV2
@@ -14,101 +7,18 @@ from albumentations.pytorch.transforms import ToTensorV2
 import torch
 import timm
 from torch import nn
-from torch.utils.data import Dataset
-from torchvision.utils import make_grid
-import torch.optim.lr_scheduler as lr_scheduler
-#
-import pytorch_lightning as pl
-from pytorch_lightning import Trainer
-from pytorch_lightning.loggers import TestTubeLogger as Tube
-from pytorch_lightning.callbacks.early_stopping import EarlyStopping
-from pytorch_lightning.callbacks import ModelCheckpoint,LearningRateMonitor
-from pytorch_lightning import LightningModule
-from sklearn.metrics import f1_score, accuracy_score
-#
-from resnet import *
 ##
-def seed_everything(seed: int = 42):
-    torch.manual_seed(seed)
-    np.random.seed(seed)
-    random.seed(seed)
-    os.environ["PYTHONHASHSEED"] = str(seed)
-    torch.cuda.manual_seed(seed)
-    torch.cuda.manual_seed_all(seed)
-    torch.backends.cudnn.deterministic = True
-    torch.backends.cudnn.benchmark = False
-    torch.backends.cudnn.enabled = False
-    print('Seed : %s'%seed)
-
-def unpickle(file):
-    # http://www.cs.toronto.edu/~kriz/cifar.html
-    with open(file, 'rb') as fo:
-        dict = pickle.load(fo, encoding='bytes')
-    fo.close()
-    return dict
-
-def check_img(rdir):
-    files = glob('%s/*data_batch*'%rdir)
-    assert len(files)>0, 'No file error'
-    d = unpickle(files[0])
-    imgset_flat = d[b'data']
-    imgset = imgset_flat.reshape(-1, 3, 32, 32)
-    batch = torch.LongTensor(imgset[:64])
-    plt.figure(figsize=[18,8])
-    plt.imshow(make_grid(batch, padding=2).permute(1, 2, 0).numpy())
-
-def load_cifar(rdir):
-    trn_files = glob('%s/*data_batch*'%rdir)
-    assert len(trn_files)>0, 'No file error'
-    tst_file = '%s/test_batch'%rdir
-    # train set
-    trnx,trny = [],[]
-    for fnm in trn_files:
-        batch = unpickle(fnm)
-        trnx.append(batch[b'data'])
-        trny.extend(batch[b'labels'])
-    trnx = np.concatenate(trnx)
-    trny = np.array(trny)
-
-    # test set
-    batch = unpickle(tst_file)
-    tstx = batch[b'data']
-    tsty = np.array(batch[b'labels'])
-    return trnx,tstx,trny,tsty
-
-class custom(Dataset):
-    def __init__(self, imgs, labels, trans, train=True):
+class squeeze(nn.Module):
+    def __init__(self):
         super().__init__()
-        self.imgs =imgs
-        self.labels = labels
-        self.trans = trans
-        self.trans_test = A.Compose([A.Normalize(),ToTensorV2()])
-        self.train=train
+    def forward(self,x):
+        return x.squeeze()
 
-    def __len__(self):
-        return len(self.labels)
-
-    def __getitem__(self, item):
-        img = self.imgs[item].reshape(3,32,32)[::-1] # BGR to RGB
-        img = np.transpose(img, (1,2,0))
-        label = self.labels[item]
-        mat = {}
-        if self.train:
-            if not self.trans is None:
-                img = self.trans(image=img)['image']
-            else:
-                img = self.trans_test(image=img)['image']
-            mat['label'] = torch.LongTensor(label)
-        else:
-            img = self.trans_test(image=img)['image']
-        mat['img'] = torch.FloatTensor(img)
-        return mat
-
-class resblock(nn.Module):
+class bottleneck(nn.Module):
     def __init__(self, in_c, out_c, stride=2, bottleneck=4):
         super().__init__()
         self.bottleneck = bottleneck
-        self.bn_c = int(in_c/bottleneck)
+        self.bn_c = int(out_c/bottleneck)
 
         self.conv = nn.Sequential(nn.Conv2d(in_c, self.bn_c, kernel_size=1, stride=1, bias=False), # this can also be implemented
                                   nn.BatchNorm2d(self.bn_c),
@@ -125,15 +35,43 @@ class resblock(nn.Module):
             self.shortcut = nn.Sequential(nn.Conv2d(in_c, out_c, kernel_size=1, stride=stride, bias=False))
 
     def forward(self, x):
-         x = self.residual_function(x) + self.shortcut(x)
+         x = self.conv(x) + self.shortcut(x)
          return x
 
-
-class res50(nn.Module):
-    def __init__(self, in_c, out_c):
+class res(nn.Module):
+    def __init__(self, in_c=3, out_c=10, block=bottleneck):
         super().__init__()
+        self.in_c = in_c
+        self.out_c = out_c
+        self.conv1 = nn.Sequential(nn.Conv2d(in_c, 64, kernel_size=7, stride=2, padding=3, bias=False),
+                                   nn.BatchNorm2d(64),
+                                   nn.ReLU(),
+                                   nn.MaxPool2d(kernel_size=3, stride=2, padding=1))
+        self.layer1 = self.make_layer(block,  64, 256, 3)
+        self.layer2 = self.make_layer(block, 256, 512, 4)
+        self.layer3 = self.make_layer(block, 512,1024, 6)
+        self.layer4 = self.make_layer(block, 1024,2048, 3)
+        self.classifier   = nn.Sequential(nn.AdaptiveAvgPool2d(1),
+                                          squeeze(),
+                                          nn.Linear(2048,out_c))
 
+    def make_layer(self, block, in_c, out_c, repeat):
+        stacked = []
+        for i in range(repeat):
+            if i==0:
+                stacked.append(block(in_c, out_c, stride=2))
+            else:
+                stacked.append(block(out_c, out_c, stride=1))
+        return nn.Sequential(*stacked)
 
+    def forward(self,x):
+        x = self.conv1(x)
+        x = self.layer1(x)
+        x = self.layer2(x)
+        x = self.layer3(x)
+        x = self.layer4(x)
+        x = self.classifier(x)
+        return x
 
 #####
 
