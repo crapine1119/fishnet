@@ -150,18 +150,50 @@ Head는 앞선 feature들을 역시 보존/정제하고 task를 수행합니다.
 
 ---
 
-* Design in combining features from different layers
+* Design in combining features from different layers (저자는 양방향 refinement를 위해 노력한 것 같습니다)
 
 다른 해상도/깊이의 feature : Nested sparse network, hyper-column, addition, residual block을 이용하여 결합이 가능
 
-> Hyper column[1] : ...<br/>
+> Hyper column[1] : 서로 다른 layer의 feature를 직접 conatenate, But layer 사이에 상호작용은 X<br/>
 ![image](https://user-images.githubusercontent.com/92928304/169502901-7ae71ed3-67d9-4ffe-8e83-0a63bfac0a3b.png)
 
+> Addition : 단순 더하는 방법, 역시 deep/shallow를 보존하거나 서로 정제할 수는 없음 (ex. ResNet의 shallow feature는 보존되지 X)<br/>
+> Concatenation : DensNet<br/>
+
+* Networks with up-sampling mechanism
+
+Classification 이외의 Computer vision에서(Detection, Segmentation) upsample은 필수적이며, 서로 다른 깊이의 layer 간의 커뮤니케이션을 포함
+
+> U-Net, FPN, stacked hourglass etc<br/>
+> 이러한 알고리즘들이 분류 task에 효과적임은 입증된적 없다.
+
+MSDNet은 large resolution(여러 depth를 의미하는 듯)의 featuremap을 유지하기 위해 노력 : FishNet과 유사한 구조
+
+> 그러나, MSDNet 역시 서로 다른 해상도 간에 conv를 이용 : Representation을 보존할 수 없음!!<br/>
+> 또한, Feature가 다양한 resolution과 semantic meaning을 가질 수 있게 만드는 upsample pathway가 부재<br/>
+(Budget prediction을 위한 multi-scale mechanism을 소개하는 것이 목표였다고 주장)
+
+FishNet의 차이점은 다음과 같다.
+
+- MSDNet 역시 분류 task에 있어 정확도 향상을 보여주진 못함 : FishNet은 처음으로 U-Net structure가 분류에 효과적임을 보여줌
+
+- Shallow/Deep layer 모두 보존하고 정제되어 final task에 적용 : 기존의 Upsample 네트워크와 다르다.
+<br/>
+
+* Message passing among features/outputs
+
+Segmentation[36], Pose estimation[3], Object detection[35] = Feature 사이의 Message passing을 이용하는 접근 방법들
+
+> 이 디자인들은 모두 Backbone 네트워크에 기반하며, fishnet은 이를 보완할 수 있음 (뒤에서 자세히 나옵니다)
+---
 
 
-> Addition : ...<br/>
-> Concatenation : ...<br/>
-> 
+
+
+
+
+
+
 
 
 
