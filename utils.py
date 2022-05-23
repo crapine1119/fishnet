@@ -26,7 +26,7 @@ from pytorch_lightning.callbacks import ModelCheckpoint,LearningRateMonitor
 from pytorch_lightning import LightningModule
 from sklearn.metrics import f1_score, accuracy_score
 #
-from resnet import *
+from models import *
 ##
 def seed_everything(seed: int = 42):
     torch.manual_seed(seed)
@@ -104,85 +104,11 @@ class custom(Dataset):
         mat['img'] = torch.FloatTensor(img)
         return mat
 
-class resblock(nn.Module):
-    def __init__(self, in_c, out_c, stride=2, bottleneck=4):
-        super().__init__()
-        self.bottleneck = bottleneck
-        self.bn_c = int(in_c/bottleneck)
+# res50 = fishnet(Ls='3,4,6,3')
+# features = res50(trn_set[0]['img'].unsqueeze(0))
+# for i in features:
+#     print(features[i].shape)
 
-        self.conv = nn.Sequential(nn.Conv2d(in_c, self.bn_c, kernel_size=1, stride=1, bias=False), # this can also be implemented
-                                  nn.BatchNorm2d(self.bn_c),
-                                  nn.ReLU(),
-                                  nn.Conv2d(self.bn_c, self.bn_c, kernel_size=1, stride=stride, bias=False),
-                                  nn.BatchNorm2d(self.bn_c),
-                                  nn.ReLU(),
-                                  nn.Conv2d(self.bn_c, out_c, kernel_size=1, stride=1, bias=False),
-                                  nn.BatchNorm2d(out_c),
-                                  nn.ReLU())
-
-        self.shortcut = nn.Sequential()
-        if (stride != 1) | (in_c != out_c):
-            self.shortcut = nn.Sequential(nn.Conv2d(in_c, out_c, kernel_size=1, stride=stride, bias=False))
-
-    def forward(self, x):
-         x = self.residual_function(x) + self.shortcut(x)
-         return x
-
-
-class res50(nn.Module):
-    def __init__(self, in_c, out_c):
-        super().__init__()
-
-
-
-#####
-
-# class BottleNeck(nn.Module):
-#     expansion = 4
-#
-#     def __init__(self, in_channels, out_channels, activation_function='ReLU', padding_mode='zeros', stride=1):
-#         super().__init__()
-#         self.padding_mode = padding_mode
-#         self.activation_function = activation_function
-#         self.bn_channels = int(out_channels / BottleNeck.expansion)
-#         self.residual_function = nn.Sequential(
-#             nn.BatchNorm3d(in_channels),
-#             eval('nn.%s()' % self.activation_function),
-#             nn.Conv3d(in_channels, self.bn_channels, kernel_size=1, stride=stride, bias=False),
-#             nn.BatchNorm3d(self.bn_channels),
-#             eval('nn.%s()' % self.activation_function),
-#             nn.Conv3d(self.bn_channels, self.bn_channels, kernel_size=(3, 3, 3), stride=1, padding=(1, 1, 1),
-#                       padding_mode=self.padding_mode, bias=False),
-#             nn.BatchNorm3d(self.bn_channels),
-#             eval('nn.%s()' % self.activation_function),
-#             nn.Conv3d(self.bn_channels, out_channels, kernel_size=1, stride=1, bias=False),
-#         )
-#
-#         self.shortcut = nn.Sequential()
-#
-#         if (stride != 1) | (in_channels != out_channels):
-#             self.shortcut = nn.Sequential(
-#                 nn.Conv3d(in_channels, out_channels, kernel_size=1, stride=stride, bias=False),
-#             )
-#
-#     def forward(self, x):
-#         x = self.residual_function(x) + self.shortcut(x)
-#         return x
-#
-#
-#
-#         # for i in range(len(self.num_strides)):
-#         #     exec('self.conv%s_x = self._make_layer(block, self.num_out[%s], self.num_blocks[%s], self.num_strides[%s])' % (i + 2, i, i, i))  # (N, 064, 12, 8, 8)
-#
-#
-#
-#     def _make_layer(self, block, out_channels, num_block, stride):
-#         strides = [stride] + [1] * (num_block - 1)
-#         layers = []
-#         for stride in strides:
-#             layers.append(block(self.in_channels, out_channels, self.hparams.activation_function, self.hparams.padding_mode, stride))
-#             self.in_channels = out_channels
-#         return nn.Sequential(*layers)
 
 ###
 
