@@ -175,9 +175,8 @@ MSDNet은 large resolution(여러 depth를 의미하는 듯)의 featuremap을 �
 
 FishNet의 차이점은 다음과 같다.
 
-- MSDNet 역시 분류 task에 있어 정확도 향상을 보여주진 못함 : FishNet은 처음으로 U-Net structure가 분류에 효과적임을 보여줌
-
-- Shallow/Deep layer 모두 보존하고 정제되어 final task에 적용 : 기존의 Upsample 네트워크와 다르다.
+> MSDNet 역시 분류 task에 있어 정확도 향상을 보여주진 못함 : FishNet은 처음으로 U-Net structure가 분류에 효과적임을 보여줌<br/>
+> Shallow/Deep layer 모두 보존하고 정제되어 final task에 적용 : 기존의 Upsample 네트워크와 다르다.
 <br/>
 
 * Message passing among features/outputs
