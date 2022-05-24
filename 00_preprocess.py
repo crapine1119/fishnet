@@ -20,7 +20,7 @@ l2n = {e:n for e,n in enumerate(names)}
 
 # check_img(rdir)
 ##
-trans = A.Compose([A.Resize(224,224, interpolation=cv.INTER_AREA),
+trans = A.Compose([A.Resize(96,96, interpolation=cv.INTER_AREA),
                    A.Normalize(mean=[0.4914, 0.4822, 0.4465],
                                std=[0.2470, 0.2435, 0.2616]),
                    ToTensorV2()])
