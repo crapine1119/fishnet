@@ -1,5 +1,5 @@
-# fishnet
+# Fishnet
 Reproduce a paper
 
-# reference
+# Reference
 https://arxiv.org/abs/1901.03495
