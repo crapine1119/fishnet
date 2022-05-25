@@ -414,13 +414,67 @@ UR block에서 dilated conv를 적용했을 때, top-1 error : 0.13% 감소 (Fis
 
 ### 4.3
 
+FishNet을 object detection(OD)과 instance segmenation에 적용 (MS COCO)
+
+백본을 제외한 모든 세팅은 동일
+
+코드 : https://github.com/open-mmlab/mmdetection
+
+---
+* MS COCO
+
+(데이터셋 소개 중략...)
+
+AP(S), AP(M), AP(L)에 대해서 모두 검증을 수행
+
+* Implementation details
+
+FPN, Mask R-CNN을 재현했고, Table 3에 기록
+
+Batch 16(16 gpus), SGD, warming-up, gradient cliping(5), End-to-end manner
+
 <br/>
+
+* OD result based on FPN
+
+FPN with fish150을 기록
+
+Top-down pathway & lateral connection 적용
+
+res50보다 2.6%, resnext50보다 1.3% AP 상승
+
 <br/>
+
+* Instance Segmentation and Object Detection Results Based on Mask R-CNN.
+
+(성능이 좋아졌다... 중략)
+
+네트워크가 multi task fasion을 학습할 경우, OD의 성능이 더 좋아짐
+
+Fish150은 channel-wise를 이용하지 않았지만, 파라미터 수는 res50, resnext50과 비슷함
+
+ResNext50과 비교했을 때, error rate는 0.2% 밖에 줄어들지 않음
+
+> OD와 Segmentation에서 AP가 개선된 것과 대조적!<br/>
+> 그리고 이것이 FishNet이 R/P level task에 효율적인 feature를 제공한다는 것을 보여준다!!
+
 <br/>
 
+* COCO Detection Challenge 2018
 
+Winning entry (fishnext299 : 43.3% on segmentation)
 
+---
 
+5. Conclusion
+
+서로 다른 레벨의 물체를 인지하기 위해 디자인된 새로운 아키텍쳐 제시 : fishnet
+
+Direct gradient propagation뿐 아니라, R/P level task에도 더 효과적임을 확인
+
+저자가 제시한 다음 연구 : 네트워크에 대한 더 디테일한 세팅 (각 스테이지 별 채널/블록, 다른 네트워크 아키텍쳐와의 결합, larger dataset에서의 performance)
+
+<br/>
 
 # Reference
 [1] B. Hariharan, P. Arbeláez, R. Girshick, and J. Malik. Hypercolumns for object segmentation and finegrained localization. In Proceedings of the IEEE conference on computer vision and pattern recognition, pages 447–456, 2015.
@@ -428,3 +482,11 @@ UR block에서 dilated conv를 적용했을 때, top-1 error : 0.13% 감소 (Fis
 [2] J.-H. Jacobsen, A. Smeulders, and E. Oyallon. i-revnet: Deep invertible networks. arXiv preprint arXiv:1802.07088, 2018.
 
 [3] F. Yu, V. Koltun, and T. Funkhouser. Dilated residual networks. In Computer Vision and Pattern Recognition, volume 1, 2017.
+
+---
+
+I-conv를 제거하고 direct prop.를 통해 P/R level의 meaning을 더 효과적으로 잡아낼 수 있다는 점이 놀랍습니다.
+
+단순하게 구조의 변경으로 성능을 개선하는 것 뿐 아니라, 그것의 의미를 찾고자 노력한 논문이라는 점에서 의미가 있었다고 생각합니다.
+
+
