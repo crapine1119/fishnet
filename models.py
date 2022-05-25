@@ -1,11 +1,4 @@
-import numpy as np
-import cv2 as cv
-#
-import albumentations as A
-from albumentations.pytorch import ToTensorV2
-#
 import torch
-import timm
 from torch import nn
 ## basic modules
 def concat(a,b):
@@ -52,8 +45,7 @@ class BN_block(nn.Module):
             self.shortcut = nn.Sequential(nn.Conv2d(in_c, out_c, kernel_size=1, stride=stride, bias=False))
 
     def forward(self, x):
-         x = self.relu(self.conv(x) + self.shortcut(x))
-         return x
+         return self.relu(self.conv(x) + self.shortcut(x))
 
 class SE_block(nn.Module):
     def __init__(self, in_c, out_c, reduction_rate=16):
@@ -85,23 +77,30 @@ def make_layer(block, in_c, out_c, repeat, last=None):
         stacked.append(last)
     return nn.Sequential(*stacked)
 
-class UR_block(nn.Module):
-    def __init__(self, in_c=512, add_c=512, block=BN_block, k=2, repeat=1):
+class UDR_block(nn.Module):
+    def __init__(self, in_c=1024, block=BN_block, k=2, phase='up'):
         super().__init__()
-        #
-        self.regular = make_layer(block, in_c, in_c, repeat=repeat)
-        self.transfer = make_layer(block, add_c, add_c, repeat=1)
-        self.out_c = in_c + add_c
-
-        self.M = BN_block(self.out_c, int(self.out_c/k)).conv
+        self.phase=phase
+        if phase=='up':
+            self.M = block(in_c, int(in_c/k)).conv
+        else:
+            self.M = block(in_c, in_c).conv
         self.upsample = nn.Upsample(scale_factor=2, mode='nearest')
+        self.dwsample = nn.MaxPool2d(kernel_size=2, stride=2, padding=0)
+        self.avgpool = nn.Sequential(nn.AdaptiveAvgPool2d(1),
+                                     squeeze())
 
-    def forward(self,x,x_add):
-        x = self.regular(x) # input
-        x_add = self.transfer(x_add)
-        x = concat(x,x_add)
-        x = self.M(x) + self.r_func(x)
-        return self.upsample(x)
+    def forward(self,x):
+        if self.phase=='up':
+            x_new = self.M(x) + self.r_func(x)
+            x_new = self.upsample(x_new)
+        elif self.phase=='down':
+            x_new = x + self.M(x)
+            x_new = self.dwsample(x_new)
+        elif self.phase=='last':
+            x_new = x + self.M(x)
+            x_new = self.avgpool(x_new)
+        return x_new
 
     def r_func(self, x, k=2):
         """
@@ -110,26 +109,45 @@ class UR_block(nn.Module):
         :return: x with reduced dimension
         """
         _, c, h, w = x.size()
-        x_r = x.contiguous().view(-1, c, h * w)
-        x_r = nn.AvgPool1d(kernel_size=k, stride=k)(x_r.permute(0, 2, 1))
-        x_r = x_r.permute(0, 2, 1).contiguous().view(-1, int(c / k), h, w)
+        x_ = x.contiguous().view(-1, c, h * w)
+        x_r_ = nn.AvgPool1d(kernel_size=k, stride=k)(x_.permute(0, 2, 1))
+        x_r = x_r_.permute(0, 2, 1).contiguous().view(-1, int(c / k), h, w)
         return x_r * k
 
-#class DR_block(nn.Module):
-    # TODO
-
+class CAT_block(nn.Module):
+    def __init__(self, in_c=512, add_c=512, block=BN_block, repeat=1, k=2, phase='up'):
+        super().__init__()
+        #
+        self.phase=phase
+        self.regular = make_layer(block, in_c, in_c, repeat=repeat)
+        self.transfer = make_layer(block, add_c, add_c, repeat=repeat)
+        self.sample = UDR_block(in_c+add_c, BN_block, k=k, phase=phase)
+    def forward(self,x,x_add):
+        """
+        :param x:
+        :param x_add:
+        :return: tuple (concatenated, sampled)
+        """
+        x = self.regular(x) # input
+        x_add = self.transfer(x_add)
+        x_new = concat(x,x_add)
+        out = self.sample(x_new)
+        if self.phase=='up':
+            return x_new,out
+        else:
+            return out
 ##
-
-
 class tail(nn.Module):
-    def __init__(self, in_c=3, block=BN_block, Ls='3,4,6,3'):
+    def __init__(self, in_c=3, block=BN_block, Ls='3,4,6,3', first_repeat=2):
         super().__init__()
         self.in_c = in_c
         self.Ls = [*map(int,Ls.split(','))]
-        self.conv1 = nn.Sequential(nn.Conv2d(in_c, 64, kernel_size=7, stride=2, padding=3, bias=False),
-                                   nn.BatchNorm2d(64),
-                                   nn.ReLU(),
-                                   nn.MaxPool2d(kernel_size=3, stride=2, padding=1))
+
+        self.conv1 = make_layer(block, in_c, 64, repeat=first_repeat, last=nn.MaxPool2d(kernel_size=3, stride=2, padding=1))
+        # self.conv1 = nn.Sequential(nn.Conv2d(in_c, 64, kernel_size=, stride=2, padding=3, bias=False),
+        #                            nn.BatchNorm2d(64),
+        #                            nn.ReLU(),
+        #                            nn.MaxPool2d(kernel_size=3, stride=2, padding=1))
         self.t1 = make_layer(block,  64, 128, repeat=self.Ls[0], last=nn.MaxPool2d(kernel_size=2,stride=2,padding=0))
         self.t2 = make_layer(block, 128, 256, repeat=self.Ls[1], last=nn.MaxPool2d(kernel_size=2,stride=2,padding=0))
         self.t3 = make_layer(block, 256, 512, repeat=self.Ls[2], last=nn.MaxPool2d(kernel_size=2,stride=2,padding=0))
@@ -141,67 +159,78 @@ class tail(nn.Module):
         x3 = self.t2(x2)
         x4 = self.t3(x3)
         to_body = self.t4(x4)
-        return {'1': x1,    '2': x2,    '3': x3,    '4': x4,    'to_body': to_body}
+        return {'1': x1,    '2': x2,    '3': x3,    '4': x4,    'bridge': to_body}
 
-class body(nn.Module):
-    def __init__(self, in_c, k=2, block=BN_block, Ls='1,1,1'):
+class body_head(nn.Module):
+    def __init__(self, in_c, k=2, block=BN_block, Ls_body='1,1,1', Ls_head='1,1,1,1'):
         super().__init__()
         self.in_c = in_c
-        self.Ls = [*map(int,Ls.split(','))]
+        self.Ls_body = [*map(int,Ls_body.split(','))]
+        self.Ls_head = [*map(int,Ls_head.split(','))]
 
-
-        self.b4 = UR_block(in_c,            in_c,        block, k=k, repeat=self.Ls[0])  # 512 512
-        self.b3 = UR_block(in_c,            int(in_c/2), block, k=k, repeat=self.Ls[1])  # 512 256
-        self.b2 = UR_block(int(in_c*3/4),   int(in_c/4),  block, k=k, repeat=self.Ls[2]) # 384 128
-        # b1은 up되지 않기 때문에 DR에서 구현
+        # body
+        self.b4 = CAT_block(in_c,           in_c,           block,  repeat=self.Ls_body[0], phase='up', k=k)  # eg. 512 + 512 -> 1024
+        self.b3 = CAT_block(in_c,           int(in_c/2),    block,  repeat=self.Ls_body[1], phase='up', k=k)  # 512 + 256
+        self.b2 = CAT_block(int(in_c*3/4),  int(in_c/4),    block,  repeat=self.Ls_body[2], phase='up', k=k) # 384 + 128
+        self.h1 = CAT_block(int(in_c*1/2),  int(in_c/8),    block,  repeat=self.Ls_head[0], phase='down', k=k)
+        self.h2 = CAT_block(int(in_c*5/8),  in_c,           block,  repeat=self.Ls_head[1], phase='down', k=k)
+        self.h3 = CAT_block(int(in_c*13/8), int(in_c*3/2),  block,  repeat=self.Ls_head[2], phase='down', k=k)
+        self.h4 = CAT_block(int(in_c*25/8), in_c,           block,  repeat=self.Ls_head[3], phase='last', k=k)
 
     def forward(self, x):
-        x4 = self.b4(x['to_body'],x['4'])
-        x3 = self.b3(x4,x['3'])
-        x2 = self.b2(x3,x['2'])
-        return {'1':x['1'], '2':x2, '3':x3, '4':x4}
-
-"""
-net1 = tail()
-net2 = body(in_c=512)
-out = net1(img)
-out2 = net2(out)
-for i in out2:
-    print(out2[i].shape)
-"""
-
-#class head(nn.Module):
+        _ , x3_ = self.b4(x['bridge'], x['4'])
+        x3, x2_ = self.b3(x3_, x['3']) # cated, sampled
+        x2, out =self.b2(x2_, x['2'])
+        #
+        out = self.h1(out,  x['1'])
+        out = self.h2(out, x2)
+        out = self.h3(out, x3)
+        out = self.h4(out, x['4'])
+        return out
 
 class fishnet(nn.Module):
-    def __init__(self, in_c=3, out_c=10, block=BN_block, Ls='3,4,6,3'):
+    def __init__(self, in_c=3, out_c=10, k=2, Ls_tail='3,4,6,3', Ls_body='1,1,1', Ls_head='1,1,1,1', block=BN_block, first_repeat=2):
         super().__init__()
 
-        self.tail = tail(in_c, block, Ls)
-        self.bridge   = SE_block(2048, reduction_rate=16)
-
+        self.tail = tail(in_c, block, Ls_tail, first_repeat=first_repeat)
+        self.body_head = body_head(in_c=512, k=k, block=BN_block, Ls_body=Ls_body, Ls_head=Ls_head)
+        self.cls = nn.Linear(2112,out_c, bias=False)
 
     def forward(self,x):
-        mat = self.tail(x)
-        to_head = mat['4']
-        #
-        mat = self.body(mat)
-        mat['4'] = to_head
-        #
-        x = self.head_forward(mat)
+        x = self.tail(x)
+        x = self.body_head(x)
+        x = self.cls(x)
         return x
 
-    def body_forward(self,x):
-        x4 = self.bridge(x['out'])
-
-        # TODO
-        return
-    def head_forward(self,x):
-        # TODO
-        return
+def make_fish(**kwargs):
+    return fishnet(**kwargs)
 
 """
-res50 = fishnet(Ls='3,4,6,3')
-res101 = fishnet(Ls='3,4,23,3')
-res152 = fishnet(Ls='3,8,36,3')
-"""
+* Fish100 
+cfg = {'first_repeat':1,
+       'k':2,
+       'Ls_tail':'3,4,6,3',
+       'Ls_body':'1,1,1',
+       'Ls_head':'1,1,1,1'}
+fish100 = make_fish(**cfg)
+ㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡ
+3  : first res block (2 in paper)
+55 : tail; 3463 *3(resnet) + 4(shortcut) + 3(SE block)
+42 : 7(body ~ head)*2(raw & added)*3(res block)
+total 100 layers
+ㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡ
 
+* Fish150
+cfg = {'first_repeat':2,
+       'k':2,
+       'Ls_tail':'3,4,6,3',
+       'Ls_body':'1,2,2',
+       'Ls_head':'2,2,2,4'}
+fish150 = make_fish(**cfg)
+ㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡ
+6  : first res block (2 in paper)
+55 : tail; 3463 *3(resnet) + 4(shortcut) + 3(SE block)
+90 : 15(body ~ head)*2(raw & added)*3(res block)
+total 151 layers
+ㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡ
+"""

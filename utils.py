@@ -1,12 +1,10 @@
 import numpy as np
-import pandas as pd
 import cv2 as cv
 import pickle
 import random
 import os
 import matplotlib.pyplot as plt
 from glob import glob as glob
-from tqdm import tqdm as tqdm
 #
 import albumentations as A
 from albumentations.pytorch.transforms import ToTensorV2
@@ -18,8 +16,6 @@ from torch.utils.data import Dataset
 from torchvision.utils import make_grid
 import torch.optim.lr_scheduler as lr_scheduler
 #
-import pytorch_lightning as pl
-from pytorch_lightning import Trainer
 from pytorch_lightning.loggers import TestTubeLogger as Tube
 from pytorch_lightning.callbacks.early_stopping import EarlyStopping
 from pytorch_lightning.callbacks import ModelCheckpoint,LearningRateMonitor
@@ -82,7 +78,6 @@ class custom(Dataset):
         self.imgs =imgs
         self.labels = labels
         self.trans = trans
-        self.trans_test = A.Compose([A.Normalize(),ToTensorV2()])
         self.train=train
 
     def __len__(self):
@@ -93,80 +88,87 @@ class custom(Dataset):
         img = np.transpose(img, (1,2,0))
         label = self.labels[item]
         mat = {}
-        if self.train:
-            if not self.trans is None:
-                img = self.trans(image=img)['image']
-            else:
-                img = self.trans_test(image=img)['image']
-            mat['label'] = torch.LongTensor(label)
-        else:
-            img = self.trans_test(image=img)['image']
+        img = self.trans(image=img)['image']
         mat['img'] = torch.FloatTensor(img)
+        if self.train:
+            mat['label'] = torch.LongTensor([label])
         return mat
 
-# res50 = fishnet(Ls='3,4,6,3')
-# features = res50(trn_set[0]['img'].unsqueeze(0))
-# for i in features:
-#     print(features[i].shape)
-
-
 ###
+def get_callbacks(hparams):
+    log_path = '%s'%(hparams.sdir)
+    tube     = Tube(name=hparams.tube_name, save_dir=log_path)
+    checkpoint_callback = ModelCheckpoint(monitor='val_loss',
+                                          filename='{epoch:02d}-{val_loss:.4f}',
+                                          save_top_k=1,
+                                          mode='min')
+    early_stopping        = EarlyStopping(monitor='val_loss',
+                                          patience=hparams.es_patience,
+                                          verbose=True,
+                                          mode='min')
+    lr_monitor = LearningRateMonitor(logging_interval='epoch')
+    print('get (1)ckp, (2)es, (3)lr_monitor callbacks with (4)tube')
+    return {'callbacks':[checkpoint_callback, early_stopping, lr_monitor],
+            'tube':tube}
 
 
-# class net(LightningModule):
-#     def __init__(self, hparams):
-#         super().__init__()
-#         self.save_hyperparameters(hparams)
-#         #self.pretrain = timm.create_model('mobilenetv2_100', pretrained=True, num_classes=hparams.out_c)
-#         #self.pretrain = timm.create_model('tf_efficientnet_b0_ns', pretrained=True, num_classes=88, drop_rate=0.2)
-#
-#
-#         self.result = []
-#     def forward(self,x):
-#         out_c = self.pretrain(x['img'])
-#         return out_c
-#
-#     def loss_f(self, modely, targety):
-#         f = nn.CrossEntropyLoss()
-#         return f(modely, targety)
-#
-#     def configure_optimizers(self):
-#         optimizer = torch.optim.AdamW(self.parameters(), lr=self.hparams.lr, weight_decay=self.hparams.wd)
-#         scheduler = lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.1,
-#                                                    patience=self.hparams.lr_patience,
-#                                                    min_lr=self.hparams.lr*.0001)
-#         return {"optimizer": optimizer,
-#                 "lr_scheduler": {"scheduler": scheduler,
-#                                  "monitor": "val_loss"}}
-#
-#     def step(self, x):
-#         label_c = x['label_c']
-#         y_hat = self(x)
-#         loss = self.loss_f(y_hat, label_c)
-#         pred_c = y_hat.argmax(-1).detach().cpu().tolist()
-#         f1_c = score_function(label_c.cpu().tolist(), pred_c)
-#         return loss, f1_c
-#
-#     def training_step(self, batch, batch_idx):
-#         loss,f1_c = self.step(batch)
-#         self.log('trn_loss', loss, on_step=False, on_epoch=True)
-#         self.log('trn_f1',   f1_c, on_step=False, on_epoch=True)
-#         return {'loss': loss}
-#
-#     def validation_step(self, batch, batch_idx):
-#         loss,f1_c = self.step(batch)
-#         self.log('val_loss', loss, on_step=False, on_epoch=True)
-#         self.log('val_f1',   f1_c, on_step=False, on_epoch=True)
-#         return {'val_loss': loss,'f1':f1_c}
-#
-#     def validation_epoch_end(self, outputs):
-#         avg_loss = torch.stack([op['val_loss'] for op in outputs]).mean()
-#         avg_f1 = torch.stack([op['f1'] for op in outputs]).mean()
-#
-#         print("\n* EPOCH %s | loss :{%4.4f} | f1 :{%2.2f}" % (self.current_epoch, avg_loss, avg_f1))
-#         return {'loss': avg_loss}
-#
-#     def test_step(self, batch, batch_idx):
-#         y_hat = self(batch)
-#         pred_c = y_hat.argmax(-1).detach().cpu().tolist()
-#         self.result.extend(pred_c)
+class net(LightningModule):
+    def __init__(self, hparams, **cfg):
+        super().__init__()
+        self.save_hyperparameters(hparams)
+        self.fish = make_fish(**cfg)
+        #self.pretrain = timm.create_model('mobilenetv2_100', pretrained=True, num_classes=hparams.out_c)
+        #self.pretrain = timm.create_model('tf_efficientnet_b0_ns', pretrained=True, num_classes=88, drop_rate=0.2)
+        self.result = []
+    def forward(self,x):
+        out = self.fish(x)
+        return out
+
+    def loss_f(self, modely, targety):
+        f = nn.CrossEntropyLoss()
+        return f(modely, targety)
+
+    def configure_optimizers(self):
+        optimizer = torch.optim.Adam(self.parameters(), lr=self.hparams.lr, weight_decay=self.hparams.wd)
+        scheduler = lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.1,
+                                                   patience=self.hparams.lr_patience,
+                                                   min_lr=self.hparams.lr*.0001)
+        return {"optimizer": optimizer,
+                "lr_scheduler": {"scheduler": scheduler,
+                                 "monitor": "val_loss"}}
+
+    def step(self, x):
+        img, label = x['img'], x['label'].view(-1)
+        y_hat = self(img)
+        loss = self.loss_f(y_hat, label)
+        pred_c = y_hat.argmax(-1).detach().cpu().tolist()
+        f1 = self.score_function(label.cpu().tolist(), pred_c)
+        return loss, f1
+
+    def score_function(self,pred, real):
+        score = f1_score(real, pred, average="macro")
+        return score
+
+    def training_step(self, batch, batch_idx):
+        loss,f1 = self.step(batch)
+        self.log('trn_loss', loss, on_step=False, on_epoch=True)
+        self.log('trn_f1',   f1, on_step=False, on_epoch=True)
+        return {'loss': loss}
+
+    def validation_step(self, batch, batch_idx):
+        loss,f1 = self.step(batch)
+        self.log('val_loss', loss, on_step=False, on_epoch=True)
+        self.log('val_f1',   f1, on_step=False, on_epoch=True)
+        return {'val_loss': loss,'f1':f1}
+
+    def validation_epoch_end(self, outputs):
+        avg_loss = torch.stack([op['val_loss'] for op in outputs]).mean()
+        avg_f1 = torch.stack([op['f1'] for op in outputs]).mean()
+
+        print("\n* EPOCH %s | val loss :{%4.4f} | val f1 :{%2.2f}" % (self.current_epoch, avg_loss, avg_f1))
+        return {'loss': avg_loss}
+
+    def test_step(self, batch, batch_idx):
+        y_hat = self(batch)
+        pred_c = y_hat.argmax(-1).detach().cpu().tolist()
+        self.result.extend(pred_c)
