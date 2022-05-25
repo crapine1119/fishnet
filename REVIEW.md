@@ -185,8 +185,67 @@ Segmentation[36], Pose estimation[3], Object detection[35] = Feature 사이의 M
 
 > 이 디자인들은 모두 Backbone 네트워크에 기반하며, fishnet은 이를 보완할 수 있음 (뒤에서 자세히 나옵니다)
 ---
+<br/>
+
+## 2. Identitiy Mappings in Deep Residual Networks and Isolated Convolution
+
+레스넷을 구성하는 기본 block은 residual block
+
+(1) Residual blocks with identitiy mapping
+![image](https://user-images.githubusercontent.com/92928304/170251745-cacc1b54-2fa4-4897-bca4-2cf5cf9778b3.png)
+
+> xl은 layer l에서 residual block에 들어가는 input feature<br/>
+> F(xl, Wl) : residual function
+<br/>
+
+본 논문에서 같은 해상도를 갖는 residual block의 stack을 Stage(s)라고 명시합니다.
+
+(2) Stacked res block by stage
+![image](https://user-images.githubusercontent.com/92928304/170252259-37193ffa-9893-4d4e-8216-08adc1a6727f.png)
+(좌측식을 편미분하면 자연스럽게 우측식이 나오고, 1이 생김으로써 마지막 layer의 gradient가 사라지지 않고 bp되어 자연스럽게 residual을 학습할 수 있게됩니다)
+<br/>
+
+여기서 저자는 서로 다른 스테이지에 있는 (다른 해상도를 갖는) feature에 대해 고민합니다.
+
+그 이유는 레스넷에서, 다른 해상도의 feature는 다른 채널수를 가지기 때문.
+
+> 따라서, downsample을 하기 전, 채널을 조절하기 위한 transition function h(ㆍ)이 필요
+
+(3) Transition function : 이전 stage X(Ls,s)에서 다음 stage X'(0,s+1)로 downsample하는 과정 (같은 stage에서 첫 layer는 0, 마지막은 Ls로 표기)
+![image](https://user-images.githubusercontent.com/92928304/170253082-2687ffe1-08b1-46d6-826f-91c268a81631.png)
+
+<br/>
+
+* Gradient propagation problem from Isolated convolution (I-conv)
+
+I-conv : identitiy mapping or concat이 없는 convolution
+
+(이전의 연구에 따르면, gradient는 deep에서 shallow로 direct propagation되는 것이 바람직하다고 합니다.)
+
+I-conv는 gradient가 직접적으로 전달되지 못하게 방해 : Resnet에서 서로 다른 해상도의 feature, Densnet에서 인접한 denseblock
+
+Stage 내의 모든 feature를 이용하는 Invertible down-sampling[2]은 I-conv의 문제를 피할 수 있지만, stage ID가 늘수록 파라미터수도 기하급수적으로 상승
 
 
+<br/>
+
+## 3. The FishNet
+
+이제 본격적으로 모델 구조에 대해서 설명합니다.
+
+![image](https://user-images.githubusercontent.com/92928304/170255515-ae9e8cdc-dbc3-4c53-9750-8b13cb23131d.png)
+---
+Tail : ResNet과 같은 기존의 CNN 네트워크이며, 깊어짐에 따라 resolution이 감소
+
+Body : 여러 Upsampleing & Refining block들을 가짐, tail과 body로부터 feature를 refine
+
+Head : 여러 Downsampling & Refining block, final task에 이용
+
+---
+
+Stage : 같은 해상도의 feature를 공급받는 conv block 뭉치
+
+Fishnet의 각 파트는 <u>output의 resolution에 따라<u/> 여러 스테이지로 나뉜다
 
 
 
@@ -198,3 +257,5 @@ Segmentation[36], Pose estimation[3], Object detection[35] = Feature 사이의 M
 
 # Reference
 [1] Bharath Hariharan, Pablo Arbelaez, Ross Girshick, Jitendra Malik; Proceedings of the IEEE Conference on Computer Vision and Pattern Recognition (CVPR), 2015, pp. 447-456
+
+[2] J.-H. Jacobsen, A. Smeulders, and E. Oyallon. i-revnet: Deep invertible networks. arXiv preprint arXiv:1802.07088, 2018.
