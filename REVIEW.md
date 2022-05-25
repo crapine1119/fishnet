@@ -276,8 +276,31 @@ fishnet은 Up-sampling & Refinement block (UR-block)과 Down-sampling & Refineme
 
 * UR block
 ![image](https://user-images.githubusercontent.com/92928304/170262288-0776e938-7b41-4c3a-ac3f-168a02189591.png)
-위의 두 변수는 각각 tail/body에서 "first layer의 output feature"를 의미
 
+위의 두 변수는 각각 tail/body에서 "first layer의 output feature"를 의미 = 해당 스테이지(resolution)가 된 첫 x를 의미 = 해상도가 변한 x
+
+(4~8)
+![image](https://user-images.githubusercontent.com/92928304/170267919-cb755ebd-c8ee-4485-93bf-7b9941f81b00.png)
+![image](https://user-images.githubusercontent.com/92928304/170267950-e1561cfc-1b0b-4f49-837d-90c94654f67e.png)
+![image](https://user-images.githubusercontent.com/92928304/170268190-ebabe4c6-1ac6-41d5-b1ed-c89228f739af.png)
+
+8 : channel-wise reduction, 채널을 k개 단위로 잘라서 더해준다.
+7 : concat
+6 : refine
+5 : upsample
+
+M : bottleneck residual block
+
+* DR block
+
+(9)
+![image](https://user-images.githubusercontent.com/92928304/170268448-52d0c183-7220-462f-930b-c0d2579e28e1.png)
+
+2x2 maxpool을 이용하며, downsample시 channel reduction을 수행하지 않습니다.
+
+> 이전 스테이지의 gradient가 직접적으로 전달<br/>
+> 이를 통해 진정한 residual block이라고 주장합니다.<br/>
+> (제 생각에는 body에도 reduction function을 적용해야 direct propagation이 될 것 같은데, 파라미터 수의 문제인지 확인해봐야 알 것 같습니다.)
 
 
 
