@@ -270,7 +270,7 @@ Horizontal connections는 transferring block를 의미하며, 본 연구에서�
 
 <br/>
 
-## 3.1 Feature refinemnet
+### 3.1 Feature refinemnet
 
 fishnet은 Up-sampling & Refinement block (UR-block)과 Down-sampling & Refinement block (DR-block)의 block을 이용
 
@@ -302,16 +302,129 @@ M : bottleneck residual block
 > 이를 통해 진정한 residual block이라고 주장합니다.<br/>
 > (제 생각에는 body에도 reduction function을 적용해야 direct propagation이 될 것 같은데, 파라미터 수의 문제인지 확인해봐야 알 것 같습니다.)
 
+<br/>
 
+### 3.2 Detail & Discussion
 
+* Design of FishNet for handling the gradient propagation problem
 
+모든 스테이지의 피쳐는 head에서 통합, I-conv가 없도록 설계
 
+따라서, 이전 백본들의 gradient propagation problem이 해결될 수 있음 : 1) Excluding I-conv at the head; 2) using concat at body/head
+
+(이전 백본도 같이 연결해서 tail로 학습하는 것을 제안했는데, tail 부분을 손보지 않으면 근본적으로 해결이 어려울 것 같다는 생각이 듭니다.)
+
+<br/>
+
+* Selection of up/down-sampling function.
+
+픽셀간의 오버랩을 피하기 위해 2x2 maxpool을 이용했습니다. 
+
+ablation study들은 네트워크에서 서로 다른 커널 사이즈의 효과를 보여줌
+
+I conv를 피하기 위해, upsample에서 weighted de-conv는 이용되면 안됨 (기존의 U-Net)
+
+> 단순함을 위해, 본 연구에서는 nearest neighbor interp를 이용<br/>
+
+> 대신 낮은 해상도의 input feature를 dilute하는 문제를 해결하기 위해, "refining block에 dilated conv를 적용"
+
+<br/>
+
+* Bridge module btw body and tail
+
+꼬리에서 마지막으로 GAP를 적용해서 1x1의 feature가 나오는데, 이를 7x7로 up하기 위해 SE-block을 이용
+
+> 글로벌한 채널의 중요도를 확률로 변환해서 7x7 스테이지에 곱해줍니다.<br/>
+> (다만, 이렇게 변환한 7x7에 transferring block을 적용해서 14x14로 만드는 건지 애매합니다 : 그림에는 안하는 걸로 나오기 때문)
+
+<br/>
+
+## 4. 실험 및 결과
+
+### 4.1 Implementation details on image classification
+
+분류 task : 이미지넷 2012 cls dataset (1000 class)을 통해 검증
+
+> 학습/검증 이미지 : 1.2m/50k <br/>
+> Augment : 224x224로 이미지를 random crop, h flip, standard color (PCA)<br/>
+> ()<br/>
+> Batch : 256 <br/>
+> Optimizer : SGD, lr 0.1, weight decay 1e-4, momentum 0.9 <br/>
+> 100 epochs (by 1/10 every 30)<br/>
+> Normalization & Standardization used <br>
+> Test : single center crop
+ 
+Fishnet은 framework이며, buliding block에 특정되지 않음
+
+> FishNet : Residual block with identitiy mapping<br/>
+> FishNeXt : REsidual block with identitiy mapping and grouping
+
+### 4.2 Experimental results on ImageNet
+
+![image](https://user-images.githubusercontent.com/92928304/170280309-5bd37347-088b-4218-8643-68577d9b8181.png)
+
+그림 4는 레스넷, 덴스넷, 피쉬넷의 파라미터 수당 top-1 error를 나타냄
+
+pre-activation ResNet을 이용할 경우 성능이 더 좋아짐을 확인
+
+* FishNet vs ResNet.
+
+공정한 비교를 위해, Resnet을 재현하고 res50/101의 결과를 나타냄 (pre-activation을 이용해서 성능이 조금 더 좋아짐을 확인)
+
+Fish150 (21.93%, 26.4M)은 파라미터 수가 res50(23.78%, 25.5M)과 거의 비슷했지만 성능은 res101(22.30%, 44.5M)을 능가
+
+또한, 적은 FLOPs로도 더 좋은 성능을 보임
+
+<br/>
+
+* FishNeXt vs ResNext
+
+![image](https://user-images.githubusercontent.com/92928304/170282936-5b76b195-b933-4973-be6a-06574c20425b.png)
+
+ResNeXt의 Channel-wise grouping을 적용할 수 있음
+
+같은 stage의 채널 수(한 그룹에서)를 통일
+
+Single group의 width는 스테이지가 1 증가할 때마다 2배 증가
+
+FishNeXt-150은 26M의 파라미터를 가짐 : ResNeXt50과 유사
+
+<br/>
+
+### 4.3 Ablation studies
+
+* Downsample : 2x2 max-pool (vs 3x3 max, 2x2 avg, conv stride2)
+
+> Stride conv는 loss가 gradient를 shallow layer로 직접 전파시키는 것을 방해 <br/>
+> Max-pool 3x3은 오버랩 때문에 구조적 정보가 왜곡 (ResNet 구현 시 반영해야할 것)
+
+<br/>
+
+* Diated conv
+
+Spatial acuity(공간에 대한 감도?)는 분류 정확도의 한계를 불러일으킴[3]
+
+UR block에서 dilated conv를 적용했을 때, top-1 error : 0.13% 감소 (Fish150)
+
+그러나 Body와 Head에 모두 적용한 경우는 오히려 성능 감소
+
++ 첫 7x7 stride conv layer를 2개의 res block으로 대체하여 top-1 error를 0.18% 감소
+
+<br/>
+
+### 4.3
+
+<br/>
+<br/>
+<br/>
 
 
 
 
 
 # Reference
-[1] Bharath Hariharan, Pablo Arbelaez, Ross Girshick, Jitendra Malik; Proceedings of the IEEE Conference on Computer Vision and Pattern Recognition (CVPR), 2015, pp. 447-456
+[1] B. Hariharan, P. Arbeláez, R. Girshick, and J. Malik. Hypercolumns for object segmentation and finegrained localization. In Proceedings of the IEEE conference on computer vision and pattern recognition, pages 447–456, 2015.
 
 [2] J.-H. Jacobsen, A. Smeulders, and E. Oyallon. i-revnet: Deep invertible networks. arXiv preprint arXiv:1802.07088, 2018.
+
+[3] F. Yu, V. Koltun, and T. Funkhouser. Dilated residual networks. In Computer Vision and Pattern Recognition, volume 1, 2017.
