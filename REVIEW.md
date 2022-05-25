@@ -218,7 +218,7 @@ Segmentation[36], Pose estimation[3], Object detection[35] = Feature 사이의 M
 
 * Gradient propagation problem from Isolated convolution (I-conv)
 
-I-conv : identitiy mapping or concat이 없는 convolution
+I-conv : identitiy mapping or concat이 없는 convolution (resolution이 바뀔 때 단순히 conv1x1 with stride2로 바꿔주는 layer를 의미하는 것 같습니다.)
 
 (이전의 연구에 따르면, gradient는 deep에서 shallow로 direct propagation되는 것이 바람직하다고 합니다.)
 
@@ -245,7 +245,40 @@ Head : 여러 Downsampling & Refining block, final task에 이용
 
 Stage : 같은 해상도의 feature를 공급받는 conv block 뭉치
 
-Fishnet의 각 파트는 <u>output의 resolution에 따라<u/> 여러 스테이지로 나뉜다
+Fishnet의 각 파트는 "output의 resolution에 따라" 여러 스테이지로 나뉨 : 해상도가 작아질수록, ID는 커짐
+
+본 연구에서는 56/1(해상도/stage), 28/2, 14/3, 7/4 로 모델을 구성
+
+![image](https://user-images.githubusercontent.com/92928304/170258138-fbb1fbe8-c02e-4ccb-b364-86d8efc76150.png)
+
+그림 3은 두 스테이지에서 feature 사이의 상호작용을 보여준다. (a)의 fish tail은 residual network로 간주한다.
+
+꼬리의 feature는 여러 residual block을 겪고 body로 전달됨
+
+바디의 경우 concat을 통해 tail과 이전 스테이지의 feature를 보존
+
+> Concated features는 upsample되며 (b)의 과정에 의해 refined (자세한건 섹션 3.1.)<br/>
+> 정제된 피쳐는 body의 다음 스테이지와, head에 이용됨
+
+헤드는 바디의 모든 feature와 이전 스테이지의 feature를 보존/정제 : 정제된 feature가 다음 스테이지로 이동
+
+<br/>
+
+그림 3(c)는 헤드에서 진행되는 message passing을 나타냄 (섹션 3.1.)
+
+Horizontal connections는 transferring block를 의미하며, 본 연구에서는 residual block을 적용 (코드 구현 시 transfer에 residual block을 적용해야함)
+
+<br/>
+
+## 3.1 Feature refinemnet
+
+fishnet은 Up-sampling & Refinement block (UR-block)과 Down-sampling & Refinement block (DR-block)의 block을 이용
+
+* UR block
+![image](https://user-images.githubusercontent.com/92928304/170262288-0776e938-7b41-4c3a-ac3f-168a02189591.png)
+위의 두 변수는 각각 tail/body에서 "first layer의 output feature"를 의미
+
+
 
 
 
