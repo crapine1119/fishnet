@@ -1,4 +1,5 @@
 import numpy as np
+import pandas as pd
 import cv2 as cv
 import pickle
 import random
@@ -23,7 +24,10 @@ from pytorch_lightning import LightningModule
 from sklearn.metrics import f1_score, accuracy_score
 #
 from models import *
-##
+from tqdm import tqdm as tqdm
+from ptflops import get_model_complexity_info
+# https://github.com/sovrasov/flops-counter.pytorch
+## preprocess
 def seed_everything(seed: int = 42):
     torch.manual_seed(seed)
     np.random.seed(seed)
@@ -63,38 +67,93 @@ def load_cifar(rdir):
         batch = unpickle(fnm)
         trnx.append(batch[b'data'])
         trny.extend(batch[b'labels'])
-    trnx = np.concatenate(trnx)
+    trnx = np.concatenate(trnx).reshape(-1,3,32,32)
     trny = np.array(trny)
 
     # test set
     batch = unpickle(tst_file)
-    tstx = batch[b'data']
+    tstx = batch[b'data'].reshape(-1,3,32,32)
     tsty = np.array(batch[b'labels'])
     return trnx,tstx,trny,tsty
 
 class custom(Dataset):
-    def __init__(self, imgs, labels, trans, train=True):
+    def __init__(self, imgs, labels, trans):
         super().__init__()
         self.imgs =imgs
         self.labels = labels
         self.trans = trans
-        self.train=train
 
     def __len__(self):
         return len(self.labels)
 
     def __getitem__(self, item):
-        img = self.imgs[item].reshape(3,32,32)[::-1] # BGR to RGB
+        img = self.imgs[item]
         img = np.transpose(img, (1,2,0))
         label = self.labels[item]
         mat = {}
         img = self.trans(image=img)['image']
         mat['img'] = torch.FloatTensor(img)
-        if self.train:
-            mat['label'] = torch.LongTensor([label])
+        mat['label'] = torch.LongTensor([label])
         return mat
 
-###
+def get_params(model, input_size):
+    with torch.cuda.device(0):
+      macs, params = get_model_complexity_info(model, input_size, as_strings=False,
+                                               print_per_layer_stat=False, verbose=True)
+
+    print('FLOP : %2.2f G'%(2*macs*1e-9))
+    print('Params : %2.2f M'%(params*1e-6))
+
+def load_ckp(n=1, path=r'C:\Users\82109\PycharmProjects\fishnet\log',fig=True):
+    if fig:
+        fig = plt.figure(figsize=[18,6])
+        ax1_leg,ax2_leg = [],[]
+
+        pth_lst = sorted(glob(r'%s\*/*/*.ckpt' % path), key=lambda x:int(x.split('\\')[-3][8:]),reverse=True)
+
+        for i in range(n):
+            best_pth = pth_lst[i]
+            version = best_pth.split('\\')[-3][8:]
+            result = pd.read_csv(r'%s/../../metrics.csv'%best_pth)
+            ax1 = fig.add_subplot(121);ax2 = fig.add_subplot(122)
+            #
+            grouped1 = result.groupby('epoch').mean()
+            grouped1.plot(y=['trn_loss'],ax=ax1, linestyle='--', marker='.', markersize=5, alpha=0.3)
+            grouped1.plot(y=['val_loss'],ax=ax1, linestyle='-', marker='.', markersize=5, alpha=0.8)
+            ax1_leg.extend(['trn_loss(%s)' % version, 'val_loss(%s)' % version])
+            ax1.set_ylim(0,5)
+            #
+            grouped2 = result.groupby('epoch').mean()
+            grouped2.plot(y=['trn_f1'],ax=ax2, linestyle='--', marker='*', markersize=5, alpha=0.3)
+            grouped2.plot(y=['val_f1'],ax=ax2, linestyle='-', marker='*', markersize=5, alpha=0.8)
+            ax2_leg.extend(['trn_f1(%s)' % version, 'val_f1(%s)' % version])
+            ax2.set_ylim(0, 1)
+        ax1.grid('on')
+        ax1.axhline(0,color='r')
+        ax2.grid('on')
+        ax2.axhline(1,color='r')
+        ax1.legend(ax1_leg)
+        ax2.legend(ax2_leg)
+    return glob(r'%s\*/*/*.ckpt'%path)[-1]
+
+def get_err(model, hparams, ckp, tst_loader):
+    model = model.load_from_checkpoint(checkpoint_path=ckp, hparams=hparams)
+    model.cuda()
+    model.eval()
+    num1,numk=0,0
+    n_dset = 0
+    for i in tqdm(tst_loader):
+        with torch.no_grad():
+            ans = model(i['img'].cuda())
+        _,top1 = ans.topk(1,dim=-1)
+        _,top5 = ans.topk(5,dim=-1)
+        num1+=(top1.cpu()==i['label']).squeeze().sum().item()
+        numk+=(top5.cpu()==i['label']).any(dim=1).sum().item()
+        n_dset+=len(top1)
+    return {'top1':num1/n_dset,
+            'top5':numk/n_dset}
+
+### pl
 def get_callbacks(hparams):
     log_path = '%s'%(hparams.sdir)
     tube     = Tube(name=hparams.tube_name, save_dir=log_path)
@@ -111,28 +170,39 @@ def get_callbacks(hparams):
     return {'callbacks':[checkpoint_callback, early_stopping, lr_monitor],
             'tube':tube}
 
-
 class net(LightningModule):
-    def __init__(self, hparams, **cfg):
+    def __init__(self, hparams):
         super().__init__()
         self.save_hyperparameters(hparams)
-        self.fish = make_fish(**cfg)
-        #self.pretrain = timm.create_model('mobilenetv2_100', pretrained=True, num_classes=hparams.out_c)
-        #self.pretrain = timm.create_model('tf_efficientnet_b0_ns', pretrained=True, num_classes=88, drop_rate=0.2)
+        self.fish = make_fish(hparams)
+        self.init_weights()
         self.result = []
     def forward(self,x):
         out = self.fish(x)
         return out
+
+    def init_weights(self):
+        for m in self.modules():
+            if isinstance(m,nn.Conv2d):
+                nn.init.kaiming_normal_(m.weight)
+                if m.bias is not None:
+                    nn.init.constant_(m.bias,0)
+            elif isinstance(m, nn.BatchNorm2d):
+                nn.init.constant_(m.weight, 1)
+                nn.init.constant_(m.bias, 0)
+            elif isinstance(m, nn.Linear):
+                nn.init.kaiming_uniform_(m.weight)
+                if m.bias is not None:
+                    nn.init.constant_(m.bias, 0)
 
     def loss_f(self, modely, targety):
         f = nn.CrossEntropyLoss()
         return f(modely, targety)
 
     def configure_optimizers(self):
+        #optimizer = torch.optim.SGD(self.parameters(), lr=self.hparams.lr, weight_decay=self.hparams.wd, momentum=0.9)
         optimizer = torch.optim.Adam(self.parameters(), lr=self.hparams.lr, weight_decay=self.hparams.wd)
-        scheduler = lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.1,
-                                                   patience=self.hparams.lr_patience,
-                                                   min_lr=self.hparams.lr*.0001)
+        scheduler = lr_scheduler.MultiStepLR(optimizer, gamma=0.1, milestones=[30,40,50])
         return {"optimizer": optimizer,
                 "lr_scheduler": {"scheduler": scheduler,
                                  "monitor": "val_loss"}}
@@ -146,7 +216,7 @@ class net(LightningModule):
         return loss, f1
 
     def score_function(self,pred, real):
-        score = f1_score(real, pred, average="macro")
+        score = f1_score(real, pred, average="micro")
         return score
 
     def training_step(self, batch, batch_idx):
@@ -172,3 +242,7 @@ class net(LightningModule):
         y_hat = self(batch)
         pred_c = y_hat.argmax(-1).detach().cpu().tolist()
         self.result.extend(pred_c)
+
+##
+
+
