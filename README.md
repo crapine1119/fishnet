@@ -27,5 +27,9 @@ Reproduce a paper
 
 <br/>
 
+6. loss_fish99.PNG : 30 에포크 까지의 crossentropy loss와 f1-score에 대한 plot입니다.
+
+<br/>
+
 # Reference
 https://arxiv.org/abs/1901.03495
