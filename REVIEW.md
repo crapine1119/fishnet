@@ -466,7 +466,7 @@ Winning entry (fishnext299 : 43.3% on segmentation)
 
 ---
 
-5. Conclusion
+## 5. Conclusion
 
 서로 다른 레벨의 물체를 인지하기 위해 디자인된 새로운 아키텍쳐 제시 : fishnet
 
