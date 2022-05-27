@@ -476,7 +476,8 @@ Direct gradient propagation뿐 아니라, R/P level task에도 더 효과적임�
 
 <br/>
 
-# Reference
+---
+## Reference
 [1] B. Hariharan, P. Arbeláez, R. Girshick, and J. Malik. Hypercolumns for object segmentation and finegrained localization. In Proceedings of the IEEE conference on computer vision and pattern recognition, pages 447–456, 2015.
 
 [2] J.-H. Jacobsen, A. Smeulders, and E. Oyallon. i-revnet: Deep invertible networks. arXiv preprint arXiv:1802.07088, 2018.
@@ -485,8 +486,8 @@ Direct gradient propagation뿐 아니라, R/P level task에도 더 효과적임�
 
 ---
 
+# Comment
+
 I-conv를 제거하고 direct prop.를 통해 P/R level의 meaning을 더 효과적으로 잡아낼 수 있다는 점이 놀랍습니다.
 
 단순하게 구조의 변경으로 성능을 개선하는 것 뿐 아니라, 그것의 의미를 찾고자 노력한 논문이라는 점에서 의미가 있었다고 생각합니다.
-
-
